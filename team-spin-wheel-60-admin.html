@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Team Spin Wheel — 60 Slots (Admin Protected)</title>
+<style>
+  :root{--bg:#0b1220;--panel:#0f1724;--muted:#9aa3b2;--text:#e9eef6;--accent:#4dd0e1;}
+  *{box-sizing:border-box}
+  body{margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; background:linear-gradient(180deg,#071025,#071426 60%); color:var(--text); padding:18px;}
+  .container{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1.2fr 1fr;gap:16px;}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border:1px solid #111827;border-radius:12px;padding:14px;}
+  h1{margin:0 0 8px;font-size:18px}
+  .muted{color:var(--muted);font-size:13px}
+  canvas{width:100%;height:auto;border-radius:999px;background:#081226;display:block;}
+  .needle{position:relative;height:14px;text-align:center;margin-top:-30px}
+  button{background:#0f1724;border:1px solid #233041;color:var(--text);padding:8px 12px;border-radius:8px;cursor:pointer}
+  button.primary{background:linear-gradient(180deg,#0b5b6a,#073741);border-color:#0f8fa0}
+  button.warn{background:linear-gradient(180deg,#5a3b0a,#3b2406);border-color:#704d16}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  textarea{width:100%;min-height:160px;border-radius:8px;padding:8px;border:1px solid #111827;background:#071426;color:var(--text);resize:vertical}
+  .small{font-size:13px}
+  .logs{max-height:360px;overflow:auto;border-radius:8px;padding:8px;border:1px solid #111827;background:#071426}
+  .log-item{padding:6px;border-bottom:1px dashed #0f1724;font-size:13px}
+  .flex{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  .pill{padding:6px 8px;border-radius:999px;background:#081827;border:1px solid #123043;color:var(--muted);font-size:13px}
+  .modal-back{position:fixed;inset:0;background:rgba(2,6,23,0.7);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal{background:linear-gradient(180deg,#091326,#0b1620);padding:16px;border-radius:12px;border:1px solid #1e2b38;min-width:320px;color:var(--text)}
+  input,select{padding:8px;border-radius:8px;border:1px solid #12202b;background:#071426;color:var(--text);width:100%}
+  .row{display:flex;gap:8px}
+  .center{display:grid;place-items:center}
+  .footer{margin-top:12px;font-size:13px;color:var(--muted)}
+  .hidden{display:none}
+  .btn-ghost{background:transparent;border:1px solid #233041}
+  .small-muted{font-size:12px;color:var(--muted)}
+  .slot-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+  .slot{padding:8px;border-radius:8px;background:#071226;border:1px solid #122233;text-align:center;cursor:pointer;user-select:none}
+  .slot.taken{opacity:.35;text-decoration:line-through;cursor:not-allowed}
+  .slot.prize{border-color:#1e6b3b}
+  .slot.loser{border-color:#6b1e1e}
+  .topbar{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .export-btn{display:inline-block;margin-right:6px}
+  .admin-note{font-size:12px;color:#cfe8e9}
+</style>
+</head>
+<body>
+  <div class="container">
+    <section class="card">
+      <div class="topbar">
+        <div>
+          <h1>Team Spin Wheel — 60 Slots</h1>
+          <div class="muted small">30 prizes + 30 losers. Each number drawn only once. Team member must enter their name when a result is drawn.</div>
+        </div>
+        <div class="flex">
+          <div class="pill" id="leftCount">60 left</div>
+          <div class="pill" id="drawnCount">0 drawn</div>
+        </div>
+      </div>
+
+      <div class="center">
+        <div style="width:100%;max-width:700px">
+          <div style="position:relative">
+            <div class="needle">🔻</div>
+            <canvas id="wheel" width="800" height="800" aria-label="Prize wheel"></canvas>
+            <div style="text-align:center;margin-top:10px">
+              <button id="spinBtn" class="primary">Spin</button>
+              <button id="undoBtn" class="btn-ghost">Undo (Admin)</button>
+              <button id="resetBtn" class="btn-ghost">Reset (Admin)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px" class="flex">
+        <div class="small-muted">Skip animation <input type="checkbox" id="skipAnim" /></div>
+        <div>
+          <button id="exportCsv" class="export-btn">Export CSV</button>
+          <button id="exportJson" class="export-btn">Export JSON</button>
+          <button id="copyState" class="export-btn">Copy State (JSON)</button>
+        </div>
+      </div>
+
+      <div style="margin-top:10px" class="flex">
+        <div style="width:48%">
+          <div class="small-muted">Remaining slots</div>
+          <div class="logs" id="remainingList" aria-live="polite"></div>
+        </div>
+        <div style="width:48%">
+          <div class="small-muted">Draw log</div>
+          <div class="logs" id="drawLog"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <aside class="card">
+      <h2 style="margin:0 0 8px">Setup entries</h2>
+      <div class="muted small">Enter your 60 entries — 30 prizes and 30 losers. Format: <code>Label | Prize text</code> or just text (if only text, you can mark prizes with "PRIZE:" or "LOSER:")</div>
+      <textarea id="entriesBox" placeholder="PRIZE | £50 voucher\nLOSER | Try again\n... (60 lines)"></textarea>
+      <div class="controls" style="margin-top:8px">
+        <button id="applyBtn" class="primary">Apply entries</button>
+        <button id="autoFillBtn">Auto-fill 30 prizes / 30 losers</button>
+        <button id="loadNumbersBtn">Load numbers 1–60</button>
+      </div>
+
+      <div style="margin-top:12px">
+        <h3 style="margin:6px 0">Quick slots view</h3>
+        <div class="slot-grid" id="slotGrid"></div>
+      </div>
+
+      <div style="margin-top:12px">
+        <h3 style="margin:6px 0">Import / Export</h3>
+        <div class="small-muted">Import a saved JSON state to restore remaining/drawn (Admin only).</div>
+        <input type="file" id="importFile" accept="application/json" />
+        <div class="footer">Host this file on GitHub Pages for a sharable team link. Exports provide a record of who claimed which slot.</div>
+      </div>
+
+      <div style="margin-top:10px" class="admin-note">Admin password is required to use Undo and Reset. (Hard-coded)</div>
+    </aside>
+  </div>
+
+  <!-- Modal for entering team member name -->
+  <div class="modal-back" id="modalBack" role="dialog" aria-modal="true">
+    <div class="modal" id="nameModal">
+      <h3 style="margin-top:0">Enter your name</h3>
+      <div class="muted small">Please enter the team member's name to confirm this draw.</div>
+      <div style="margin-top:8px"><input id="memberName" placeholder="Full name" /></div>
+      <div style="margin-top:12px" class="row">
+        <button id="confirmName" class="primary">Confirm</button>
+        <button id="cancelName" class="btn-ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // Hard-coded admin password
+  const ADMIN_PASSWORD = "Williams1";
+
+  // Elements
+  const wheel = document.getElementById('wheel');
+  const ctx = wheel.getContext('2d');
+  const spinBtn = document.getElementById('spinBtn');
+  const undoBtn = document.getElementById('undoBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const entriesBox = document.getElementById('entriesBox');
+  const applyBtn = document.getElementById('applyBtn');
+  const autoFillBtn = document.getElementById('autoFillBtn');
+  const loadNumbersBtn = document.getElementById('loadNumbersBtn');
+  const remainingList = document.getElementById('remainingList');
+  const drawLog = document.getElementById('drawLog');
+  const leftCount = document.getElementById('leftCount');
+  const drawnCount = document.getElementById('drawnCount');
+  const slotGrid = document.getElementById('slotGrid');
+  const importFile = document.getElementById('importFile');
+  const exportCsv = document.getElementById('exportCsv');
+  const exportJson = document.getElementById('exportJson');
+  const copyState = document.getElementById('copyState');
+  const skipAnim = document.getElementById('skipAnim');
+  const modalBack = document.getElementById('modalBack');
+  const memberName = document.getElementById('memberName');
+  const confirmName = document.getElementById('confirmName');
+  const cancelName = document.getElementById('cancelName');
+
+  const STORAGE = 'team-wheel-state-v1';
+
+  // State: array of 60 slot objects {num:1..60, label: "PRIZE"/"LOSER" or "UNKNOWN", text: "Prize 1", taken: false}
+  let slots = [];
+  let drawn = []; // {num,label,text,member,timestamp}
+  let pendingDraw = null; // index into slots for when name is required
+
+  function initDefaultSlots(){
+    slots = Array.from({length:60}, (_,i)=>({num:i+1, label:'UNKNOWN', text:`Slot ${i+1}`, taken:false}));
+    drawn = [];
+    saveState();
+  }
+
+  // Parse entries textarea -> slots
+  function applyEntries(){
+    const lines = entriesBox.value.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length>0);
+    if (lines.length !== 60){
+      if (!confirm(`You entered ${lines.length} lines. The wheel requires exactly 60 entries. Continue and auto-fill remaining with 'LOSER'?`)){
+        return;
+      }
+    }
+    // Map each provided line to a slot, remaining auto-filled as LOSER
+    for (let i=0;i<60;i++){
+      const raw = lines[i] || `LOSER | Try again`;
+      const parsed = parseLine(raw);
+      slots[i] = {num:i+1, label: parsed.label, text: parsed.text, taken: false};
+    }
+    drawn = []; // applying entries resets drawn for clarity
+    saveState();
+    redrawAll();
+  }
+
+  function parseLine(line){
+    // Accept formats:
+    // "PRIZE | $50 voucher" or "LOSER | Try again" or "Prize: $50" or "PRIZE $50" or plain "My prize"
+    const sep = line.split('|');
+    if (sep.length >= 2){
+      const left = sep[0].trim().toUpperCase();
+      const right = sep.slice(1).join('|').trim();
+      if (left.includes('PRIZE')) return {label:'PRIZE', text:right};
+      if (left.includes('LOSER')) return {label:'LOSER', text:right};
+      return {label:left, text:right};
+    }
+    // Try colon
+    const col = line.split(':');
+    if (col.length >=2){
+      const left = col[0].trim().toUpperCase();
+      const right = col.slice(1).join(':').trim();
+      if (left.includes('PRIZE')) return {label:'PRIZE', text:right};
+      if (left.includes('LOSER')) return {label:'LOSER', text:right};
+      return {label:'TEXT', text:line};
+    }
+    // Try prefix words
+    const up = line.toUpperCase();
+    if (up.startsWith('PRIZE')) return {label:'PRIZE', text: line.replace(/^\s*PRIZE\s*[:\-]?\s*/i,'')||'Prize'};
+    if (up.startsWith('LOSER')) return {label:'LOSER', text: line.replace(/^\s*LOSER\s*[:\-]?\s*/i,'')||'Loser'};
+    // default: ambiguous => treat as PRIZE if contains $ or Voucher keywords, else LOSER? We'll keep as PRIZE to be safe
+    const prizeHints = ['£','$','VOUCHER','GIFT','PRIZE','TICKET','DISCOUNT'];
+    if (prizeHints.some(h=>up.includes(h))) return {label:'PRIZE', text:line};
+    return {label:'LOSER', text:line};
+  }
+
+  function autoFill(){
+    // Auto-fill 30 prizes + 30 losers for testing
+    slots = [];
+    for (let i=0;i<30;i++) slots.push({num:i+1,label:'PRIZE', text:`Prize ${i+1}`, taken:false});
+    for (let i=30;i<60;i++) slots.push({num:i+1,label:'LOSER', text:`LOSER`, taken:false});
+    drawn = [];
+    entriesBox.value = slots.map(s=>`${s.label} | ${s.text}`).join('\n');
+    saveState();
+    redrawAll();
+  }
+
+  function loadNumbers(){
+    slots = Array.from({length:60}, (_,i)=>({num:i+1,label:'UNKNOWN',text:`#${i+1}`,taken:false}));
+    entriesBox.value = slots.map(s=>`${s.text}`).join('\n');
+    drawn = [];
+    saveState();
+    redrawAll();
+  }
+
+  // Drawing wheel visuals
+  let rotation = -Math.PI/2;
+  function segColor(i, n){
+    return `hsl(${(i*(360/n))%360} 70% 45%)`;
+  }
+  function drawWheel(){
+    const size = Math.min(wheel.width, wheel.height);
+    ctx.clearRect(0,0,wheel.width,wheel.height);
+    const r = size/2;
+    const cx = wheel.width/2, cy = wheel.height/2;
+    const available = slots.filter(s=>!s.taken);
+    const n = available.length || 1;
+    const step = (Math.PI*2)/n;
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(rotation);
+    for (let i=0;i<n;i++){
+      const a0 = i*step;
+      const a1 = (i+1)*step;
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.arc(0,0,r-8,a0,a1);
+      ctx.closePath();
+      ctx.fillStyle = segColor(i,n);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // text
+      ctx.save();
+      const mid = (a0+a1)/2;
+      ctx.rotate(mid);
+      ctx.translate(r*0.6,0);
+      ctx.rotate(Math.PI/2);
+      ctx.fillStyle = '#fff';
+      ctx.font = `${Math.max(12, Math.floor(r/18))}px system-ui`;
+      const label = available[i].text;
+      const text = label.length>26 ? label.slice(0,24)+'…' : label;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`#${available[i].num} ${text}`, 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
+    // center cap
+    ctx.beginPath();
+    ctx.arc(cx,cy,36,0,Math.PI*2);
+    ctx.fillStyle='#081424';
+    ctx.fill();
+    ctx.strokeStyle='#0f2b38';
+    ctx.stroke();
+  }
+
+  function resizeCanvas(){
+    const rect = wheel.getBoundingClientRect();
+    const scale = window.devicePixelRatio || 1;
+    wheel.width = Math.floor(rect.width * scale);
+    wheel.height = Math.floor(rect.width * scale); // keep square
+    ctx.setTransform(scale,0,0,scale,0,0);
+    drawWheel();
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  // Get index in slots for the nth available slice
+  function availableList(){
+    return slots.map((s,i)=>({s,i})).filter(o=>!o.s.taken).map(o=>o);
+  }
+
+  function pickRandomAvailableIndex(){
+    const avail = availableList();
+    if (avail.length===0) return -1;
+    return Math.floor(Math.random()*avail.length);
+  }
+
+  // Spin logic
+  let spinning=false;
+  async function spin(){
+    if (spinning) return;
+    const avail = availableList();
+    if (avail.length===0){ alert('All slots drawn'); return; }
+    spinning = true;
+    const chosenPos = pickRandomAvailableIndex();
+    const n = avail.length;
+    const step = (Math.PI*2)/n;
+    const targetAngle = (chosenPos + 0.5)*step;
+    const current = rotation % (Math.PI*2);
+    const full = 4 + Math.floor(Math.random()*4);
+    const desired = -Math.PI/2 - targetAngle + full*(Math.PI*2);
+    const duration = skipAnim.checked ? 120 : 2000 + Math.random()*1800;
+    const start = performance.now();
+    const startRot = rotation;
+    const delta = desired - current;
+    await new Promise(resolve=>{
+      function frame(t){
+        const p = Math.min(1,(t-start)/duration);
+        const e = 1 - Math.pow(1-p,3); // ease out cubic
+        rotation = startRot + delta*e;
+        drawWheel();
+        if (p<1) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+    // finalize: mark chosen slot as pending and open modal for name
+    const chosen = avail[chosenPos];
+    pendingDraw = chosen.i; // slot index in slots[]
+    openNameModal();
+    spinning = false;
+  }
+
+  // After name entered, record draw
+  function finalizeDraw(name){
+    if (pendingDraw === null) return;
+    const s = slots[pendingDraw];
+    s.taken = true;
+    const entry = {num:s.num, label:s.label, text:s.text, member:name, timestamp:new Date().toISOString()};
+    drawn.unshift(entry);
+    pendingDraw = null;
+    saveState();
+    redrawAll();
+    showTemporaryToast(`Recorded: #${entry.num} — ${entry.text} (${entry.member})`);
+  }
+
+  // Admin check (simple prompt)
+  function requireAdmin(actionName){
+    const attempt = prompt(`Admin password required to ${actionName}. Enter password:`);
+    if (attempt === null) return false;
+    if (attempt === ADMIN_PASSWORD) return true;
+    alert('Incorrect admin password');
+    return false;
+  }
+
+  // Undo last draw (admin only)
+  function undo(){
+    if (!requireAdmin('undo last draw')) return;
+    if (drawn.length===0) return alert('No draws to undo');
+    const last = drawn.shift();
+    const idx = slots.findIndex(s=>s.num===last.num);
+    if (idx>=0) slots[idx].taken = false;
+    saveState();
+    redrawAll();
+    showTemporaryToast('Undo performed (admin)');
+  }
+
+  // Reset
+  function resetAll(){
+    if (!requireAdmin('reset the wheel')) return;
+    if (!confirm('Reset wheel? This will clear all draws.')) return;
+    slots.forEach(s=>s.taken=false);
+    drawn = [];
+    saveState();
+    redrawAll();
+    showTemporaryToast('Wheel reset (admin)');
+  }
+
+  // Import (admin only)
+  function importStateFromFile(file){
+    if (!requireAdmin('import state')) return;
+    const r = new FileReader();
+    r.onload = ()=>{
+      try{
+        const data = JSON.parse(r.result);
+        if (Array.isArray(data.slots)) slots = data.slots;
+        if (Array.isArray(data.drawn)) drawn = data.drawn;
+        saveState();
+        redrawAll();
+        alert('Imported state');
+      }catch(err){ alert('Invalid JSON'); }
+    };
+    r.readAsText(file);
+  }
+
+  // UI updates
+  function redrawAll(){
+    // remaining list
+    remainingList.innerHTML = '';
+    slots.filter(s=>!s.taken).forEach(s=>{
+      const div = document.createElement('div');
+      div.className = 'log-item';
+      div.innerHTML = `<strong>#${s.num}</strong> ${escapeHtml(s.label)} — ${escapeHtml(s.text)}`;
+      remainingList.appendChild(div);
+    });
+    // draw log
+    drawLog.innerHTML = '';
+    drawn.forEach((d,i)=>{
+      const div = document.createElement('div');
+      div.className='log-item';
+      const t = new Date(d.timestamp).toLocaleString();
+      div.innerHTML = `<strong>#${d.num}</strong> ${escapeHtml(d.label)} — ${escapeHtml(d.text)} <div class="small-muted">claimed by <em>${escapeHtml(d.member)}</em> at ${t}</div>`;
+      drawLog.appendChild(div);
+    });
+    leftCount.textContent = `${slots.filter(s=>!s.taken).length} left`;
+    drawnCount.textContent = `${drawn.length} drawn`;
+    updateSlotGrid();
+    drawWheel();
+  }
+
+  function updateSlotGrid(){
+    slotGrid.innerHTML='';
+    slots.forEach(s=>{
+      const el = document.createElement('div');
+      el.className = 'slot' + (s.taken? ' taken':'') + (s.label==='PRIZE'?' prize':'') + (s.label==='LOSER'?' loser':'');
+      el.textContent = `#${s.num}`;
+      el.title = `${s.label} — ${s.text}${s.taken?' (taken)':''}`;
+      slotGrid.appendChild(el);
+    });
+  }
+
+  function escapeHtml(str){ return (str+'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+  // Modal handling
+  function openNameModal(){
+    modalBack.style.display='flex';
+    memberName.value='';
+    setTimeout(()=>memberName.focus(),30);
+  }
+  function closeModal(){ modalBack.style.display='none'; pendingDraw = null; }
+
+  confirmName.addEventListener('click', ()=>{
+    const name = memberName.value.trim();
+    if (!name) return alert('Please enter your name to claim this draw.');
+    finalizeDraw(name);
+    closeModal();
+  });
+  cancelName.addEventListener('click', ()=>{ closeModal(); });
+
+  // Persistence
+  function saveState(){
+    const state = {slots, drawn, rotation};
+    try{ localStorage.setItem(STORAGE, JSON.stringify(state)); }catch(e){ console.warn('Could not save state', e); }
+  }
+  function loadState(){
+    try{
+      const raw = localStorage.getItem(STORAGE);
+      if (raw){ const s = JSON.parse(raw); slots = s.slots || slots; drawn = s.drawn || drawn; rotation = s.rotation || rotation; return; }
+    }catch(e){ /* ignore */ }
+    initDefaultSlots();
+  }
+
+  // Import / Export
+  function exportCSV(){
+    const rows = [['num','label','text','member','timestamp']];
+    drawn.slice().reverse().forEach(d=> rows.push([d.num, d.label, d.text, d.member, d.timestamp]));
+    const csv = rows.map(r=> r.map(c=> `"${(''+(c||'')).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download='drawn.csv'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+  }
+  function exportJSON(){
+    const data = {slots, drawn, exportedAt:new Date().toISOString()};
+    const blob = new Blob([JSON.stringify(data, null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download='wheel-state.json'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+  }
+  copyState.addEventListener('click', ()=>{
+    const data = JSON.stringify({slots, drawn});
+    navigator.clipboard?.writeText(data).then(()=> alert('State copied to clipboard (JSON). You can paste to another instance to restore).'), ()=> alert('Copy failed - permission denied.'));
+  });
+
+  importFile.addEventListener('change', (e)=>{
+    const f = e.target.files[0];
+    if (!f) return;
+    importStateFromFile(f);
+    importFile.value='';
+  });
+
+  exportCsv.addEventListener('click', exportCSV);
+  exportJson.addEventListener('click', exportJSON);
+
+  // Small toast
+  let toastTimer = null;
+  function showTemporaryToast(msg){
+    if (toastTimer) clearTimeout(toastTimer);
+    const t = document.createElement('div');
+    t.style.position='fixed'; t.style.right='14px'; t.style.bottom='14px'; t.style.background='#071426'; t.style.border='1px solid #234'; t.style.padding='10px 12px'; t.style.borderRadius='10px'; t.style.zIndex=9999;
+    t.textContent = msg; document.body.appendChild(t);
+    toastTimer = setTimeout(()=>{ t.remove(); toastTimer=null; },2500);
+  }
+
+  // Undo / Reset handlers
+  undoBtn.addEventListener('click', ()=>{ undo(); });
+  resetBtn.addEventListener('click', ()=>{ resetAll(); });
+
+  // Spin handler
+  spinBtn.addEventListener('click', ()=> spin());
+
+  // Apply and quick fill
+  applyBtn.addEventListener('click', applyEntries);
+  autoFillBtn.addEventListener('click', ()=>{ if (confirm('Auto-fill 30 prizes and 30 losers?')) autoFill(); });
+  loadNumbersBtn.addEventListener('click', ()=>{ if (confirm('Load numbers 1-60?')) loadNumbers(); });
+
+  // Click slot grid to mark manually as taken (admin override)
+  slotGrid.addEventListener('click', (e)=>{
+    const el = e.target.closest('.slot');
+    if (!el) return;
+    const txt = el.textContent.replace('#','').trim();
+    const n = parseInt(txt,10);
+    if (isNaN(n)) return;
+    const idx = slots.findIndex(s=>s.num===n);
+    if (idx<0) return;
+    if (slots[idx].taken){
+      if (!confirm('This slot is taken. Un-take it?')) return;
+      slots[idx].taken = false;
+      // remove from drawn log if present
+      const di = drawn.findIndex(d=>d.num===n);
+      if (di>=0) drawn.splice(di,1);
+    } else {
+      if (!confirm(`Mark #${n} as taken without spin? (This does NOT require a name)`)) return;
+      slots[idx].taken = true;
+    }
+    saveState();
+    redrawAll();
+  });
+
+  // Startup
+  loadState();
+  redrawAll();
+
+  // Export helpers wired above
+})(); 
+</script>
+</body>
+</html>
